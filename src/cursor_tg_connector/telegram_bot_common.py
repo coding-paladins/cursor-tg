@@ -169,13 +169,14 @@ def render_branch_keyboard(
 
 def render_machine_keyboard(
     page_data: RepositoryPage,
-    all_machines: list[str],
+    machine_labels: dict[str, str] | None = None,
 ) -> InlineKeyboardMarkup:
+    labels = machine_labels or {}
     start_index = page_data.page * 8
     rows = [
         [
             InlineKeyboardButton(
-                machine,
+                labels.get(machine, machine),
                 callback_data=f"{MACHINE_SELECT_PREFIX}{start_index + index}",
             )
         ]

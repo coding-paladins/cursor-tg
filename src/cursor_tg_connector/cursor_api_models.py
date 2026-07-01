@@ -67,6 +67,20 @@ class ApiKeyInfo(BaseModel):
     user_email: str | None = Field(default=None, alias="userEmail")
 
 
+class PrivateWorker(BaseModel):
+    name: str
+    repo_url: str = Field(alias="repoUrl")
+    repo_owner: str = Field(alias="repoOwner")
+    repo_name: str = Field(alias="repoName")
+    is_in_use: bool = Field(alias="isInUse")
+    workspace_root_path: str | None = Field(default=None, alias="workspaceRootPath")
+    worker_id: str | None = Field(default=None, alias="workerId")
+
+
+class ListPrivateWorkersResponse(BaseModel):
+    workers: list[PrivateWorker]
+
+
 class ErrorBody(BaseModel):
     message: str | None = None
 

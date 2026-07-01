@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from cursor_tg_connector.cursor_api_models import Agent, AgentConversation
+from cursor_tg_connector.cursor_api_models import Agent, AgentConversation, PrivateWorker
 from cursor_tg_connector.domain_types import WizardStep
 from cursor_tg_connector.services_create_agent_service import CreateAgentError, CreateAgentService
 
@@ -26,7 +26,28 @@ def _make_agent(
     )
 
 
-MY_MACHINES = ["coder-repo-a", "coder-repo-b"]
+def _make_worker(
+    name: str,
+    repo_url: str,
+    *,
+    is_in_use: bool = False,
+) -> PrivateWorker:
+    owner, repo_name = repo_url.rstrip("/").split("/")[-2:]
+    return PrivateWorker.model_validate(
+        {
+            "name": name,
+            "repoUrl": repo_url,
+            "repoOwner": owner,
+            "repoName": repo_name,
+            "isInUse": is_in_use,
+        }
+    )
+
+
+MY_MACHINES = [
+    _make_worker("coder-repo-a", "https://github.com/acme/repo-a"),
+    _make_worker("coder-repo-b", "https://github.com/acme/repo-b"),
+]
 
 
 class FakeCursorClient:
@@ -37,6 +58,7 @@ class FakeCursorClient:
             "https://github.com/acme/repo-b",
         ]
         self.agents: list[Agent] = []
+        self.my_machines = list(MY_MACHINES)
         self.created_agent_calls: list[tuple[str, str, str, str, str]] = []
         self.conversations: dict[str, list[dict[str, str]]] = {}
 
@@ -48,6 +70,9 @@ class FakeCursorClient:
 
     async def list_agents(self) -> list[Agent]:
         return self.agents
+
+    async def list_my_machines(self) -> list[PrivateWorker]:
+        return self.my_machines
 
     async def create_agent(
         self,
@@ -85,7 +110,7 @@ class FakeCursorClient:
 @pytest.mark.asyncio
 async def test_create_agent_wizard_happy_path(state_repo) -> None:
     client = FakeCursorClient()
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
 
     models = await service.start_wizard(1234, 5678)
     assert models == ["gpt-5.4", "opus-4.6-fast"]
@@ -101,7 +126,6 @@ async def test_create_agent_wizard_happy_path(state_repo) -> None:
     assert "main" in branches
 
     await service.save_branch(1234, "main")
-    await service.choose_machine(1234, 1)
     agent = await service.finish_prompt(1234, "Implement it")
 
     session = await service.get_session(1234)
@@ -120,7 +144,7 @@ async def test_choose_repository_returns_branches_from_agents(state_repo) -> Non
         _make_agent("a3", "https://github.com/acme/repo-a", "staging"),
         _make_agent("a4", "https://github.com/acme/repo-b", "develop"),
     ]
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
 
@@ -134,7 +158,7 @@ async def test_choose_repository_omits_main_duplicate(state_repo) -> None:
     client.agents = [
         _make_agent("a1", "https://github.com/acme/repo-b", "main"),
     ]
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
 
@@ -148,7 +172,7 @@ async def test_choose_branch_via_selector(state_repo) -> None:
     client.agents = [
         _make_agent("a1", "https://github.com/acme/repo-b", "develop"),
     ]
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
     await service.choose_repository(1234, 1)
@@ -156,15 +180,15 @@ async def test_choose_branch_via_selector(state_repo) -> None:
     await service.choose_branch(1234, 1)
 
     session = await service.get_session(1234)
-    assert session.wizard_state == WizardStep.WAITING_MACHINE
+    assert session.wizard_state == WizardStep.WAITING_PROMPT
     assert session.wizard_payload["branch"] == "develop"
+    assert session.wizard_payload["machine"] == "coder-repo-b"
     assert "branches" not in session.wizard_payload
-    assert session.wizard_payload["machines"] == MY_MACHINES
 
 
 @pytest.mark.asyncio
 async def test_choose_branch_invalid_index(state_repo) -> None:
-    service = CreateAgentService(FakeCursorClient(), state_repo, MY_MACHINES)
+    service = CreateAgentService(FakeCursorClient(), state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
     await service.choose_repository(1234, 0)
@@ -180,7 +204,7 @@ async def test_get_branch_page(state_repo) -> None:
         _make_agent("a1", "https://github.com/acme/repo-a", "develop"),
         _make_agent("a2", "https://github.com/acme/repo-a", "staging"),
     ]
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
     await service.choose_repository(1234, 0)
@@ -193,7 +217,7 @@ async def test_get_branch_page(state_repo) -> None:
 
 @pytest.mark.asyncio
 async def test_save_branch_cleans_up_branches_key(state_repo) -> None:
-    service = CreateAgentService(FakeCursorClient(), state_repo, MY_MACHINES)
+    service = CreateAgentService(FakeCursorClient(), state_repo)
     await service.start_wizard(1234, 5678)
     await service.choose_model(1234, "gpt-5.4")
     await service.choose_repository(1234, 0)
@@ -201,22 +225,67 @@ async def test_save_branch_cleans_up_branches_key(state_repo) -> None:
     await service.save_branch(1234, "custom-branch")
 
     session = await service.get_session(1234)
-    assert session.wizard_state == WizardStep.WAITING_MACHINE
+    assert session.wizard_state == WizardStep.WAITING_PROMPT
     assert session.wizard_payload["branch"] == "custom-branch"
+    assert session.wizard_payload["machine"] == "coder-repo-a"
     assert "branches" not in session.wizard_payload
 
 
 @pytest.mark.asyncio
-async def test_start_wizard_requires_my_machines(state_repo) -> None:
-    service = CreateAgentService(FakeCursorClient(), state_repo, [])
+async def test_advance_to_machine_step_shows_picker_for_multiple_matches(state_repo) -> None:
+    client = FakeCursorClient()
+    client.my_machines = [
+        _make_worker("coder-repo-a-primary", "https://github.com/acme/repo-a"),
+        _make_worker("coder-repo-a-secondary", "https://github.com/acme/repo-a"),
+    ]
+    service = CreateAgentService(client, state_repo)
+    await service.start_wizard(1234, 5678)
+    await service.choose_model(1234, "gpt-5.4")
+    await service.choose_repository(1234, 0)
 
-    with pytest.raises(CreateAgentError, match="No My Machines configured"):
-        await service.start_wizard(1234, 5678)
+    await service.save_branch(1234, "main")
+
+    session = await service.get_session(1234)
+    assert session.wizard_state == WizardStep.WAITING_MACHINE
+    assert session.wizard_payload["machines"] == [
+        "coder-repo-a-primary",
+        "coder-repo-a-secondary",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_advance_to_machine_step_errors_when_no_workers_match_repo(state_repo) -> None:
+    client = FakeCursorClient()
+    client.my_machines = [_make_worker("coder-other", "https://github.com/acme/other-repo")]
+    service = CreateAgentService(client, state_repo)
+    await service.start_wizard(1234, 5678)
+    await service.choose_model(1234, "gpt-5.4")
+    await service.choose_repository(1234, 0)
+
+    with pytest.raises(CreateAgentError, match="No connected My Machines found"):
+        await service.save_branch(1234, "main")
+
+
+@pytest.mark.asyncio
+async def test_advance_to_machine_step_auto_skips_when_single_match(state_repo) -> None:
+    client = FakeCursorClient()
+    client.my_machines = [_make_worker("coder-repo-a", "https://github.com/acme/repo-a")]
+    service = CreateAgentService(client, state_repo)
+    await service.start_wizard(1234, 5678)
+    await service.choose_model(1234, "gpt-5.4")
+    await service.choose_repository(1234, 0)
+
+    await service.save_branch(1234, "main")
+
+    session = await service.get_session(1234)
+    assert session.wizard_state == WizardStep.WAITING_PROMPT
+    assert session.wizard_payload["machine"] == "coder-repo-a"
+    assert "machines" not in session.wizard_payload
 
 
 @pytest.mark.asyncio
 async def test_create_agent_start_is_rate_limited(state_repo) -> None:
-    service = CreateAgentService(FakeCursorClient(), state_repo, MY_MACHINES)
+    service = CreateAgentService(FakeCursorClient(), state_repo)
     await state_repo.set_last_create_agent_at(1234, datetime.now(tz=UTC) - timedelta(seconds=30))
 
     with pytest.raises(CreateAgentError, match="once per minute"):
@@ -230,7 +299,7 @@ async def test_finish_prompt_silences_previous_active_agent_unread_state(state_r
         {"id": "m1", "type": "assistant_message", "text": "old one"},
         {"id": "m2", "type": "assistant_message", "text": "old two"},
     ]
-    service = CreateAgentService(client, state_repo, MY_MACHINES)
+    service = CreateAgentService(client, state_repo)
 
     session = await state_repo.get_session(1234)
     session.active_agent_id = "agent-old"
@@ -241,7 +310,6 @@ async def test_finish_prompt_silences_previous_active_agent_unread_state(state_r
     await service.choose_model(1234, "gpt-5.4")
     await service.choose_repository(1234, 0)
     await service.save_branch(1234, "main")
-    await service.choose_machine(1234, 0)
 
     await service.finish_prompt(1234, "Create the new agent")
 

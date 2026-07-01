@@ -13,7 +13,9 @@ from cursor_tg_connector.cursor_api_models import (
     ErrorEnvelope,
     ListAgentsResponse,
     ListModelsResponse,
+    ListPrivateWorkersResponse,
     ListRepositoriesResponse,
+    PrivateWorker,
     PromptImage,
 )
 
@@ -141,6 +143,15 @@ class CursorApiClient:
         payload = await self._request("GET", "/v0/repositories")
         response = ListRepositoriesResponse.model_validate(payload)
         return [repository.repository for repository in response.repositories]
+
+    async def list_my_machines(self, *, status: str = "all") -> list[PrivateWorker]:
+        payload = await self._request(
+            "GET",
+            "/v0/private-workers",
+            params={"status": status},
+        )
+        response = ListPrivateWorkersResponse.model_validate(payload)
+        return response.workers
 
     async def _request(
         self,

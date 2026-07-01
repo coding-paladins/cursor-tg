@@ -135,14 +135,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             session = await services.create_agent_service.get_session(
                 services.settings.telegram_allowed_user_id
             )
-            machines = session.wizard_payload["machines"]
         except CreateAgentError as exc:
             await msg.reply_text(str(exc))
             return
+        if session.wizard_state == WizardStep.WAITING_PROMPT:
+            machine_name = session.wizard_payload["machine"]
+            await msg.reply_text(
+                f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+                f"on machine {machine_name!r}."
+            )
+            return
+        machine_labels = session.wizard_payload.get("machine_labels", {})
         await msg.reply_text(
             "Step 4/5: Select the My Machine to run this agent on. "
             "The worker must be started in a checkout of the selected repository.",
-            reply_markup=render_machine_keyboard(page_data, machines),
+            reply_markup=render_machine_keyboard(page_data, machine_labels),
         )
         return
 

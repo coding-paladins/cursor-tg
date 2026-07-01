@@ -3,7 +3,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from cursor_tg_connector.domain_types import UnselectedAgentUnreadMode
+from cursor_tg_connector.domain_types import UnselectedAgentUnreadMode, WizardStep
 from cursor_tg_connector.github_api_client import GitHubApiError
 from cursor_tg_connector.services_create_agent_service import CreateAgentError
 from cursor_tg_connector.services_notification import TelegramNotifier
@@ -323,16 +323,24 @@ async def _select_branch(
         session = await services.create_agent_service.get_session(
             services.settings.telegram_allowed_user_id
         )
-        machines = session.wizard_payload["machines"]
     except CreateAgentError as exc:
         await query.answer(str(exc), show_alert=True)
         return
 
     await query.answer("Branch selected")
+    if session.wizard_state == WizardStep.WAITING_PROMPT:
+        machine_name = session.wizard_payload["machine"]
+        await query.edit_message_text(
+            f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+            f"on machine {machine_name!r}."
+        )
+        return
+
+    machine_labels = session.wizard_payload.get("machine_labels", {})
     await query.edit_message_text(
         "Step 4/5: Select the My Machine to run this agent on. "
         "The worker must be started in a checkout of the selected repository.",
-        reply_markup=render_machine_keyboard(page_data, machines),
+        reply_markup=render_machine_keyboard(page_data, machine_labels),
     )
 
 
@@ -351,14 +359,14 @@ async def _show_machine_page(
         session = await services.create_agent_service.get_session(
             services.settings.telegram_allowed_user_id
         )
-        machines = session.wizard_payload["machines"]
+        machine_labels = session.wizard_payload.get("machine_labels", {})
     except CreateAgentError as exc:
         await query.answer(str(exc), show_alert=True)
         return
 
     await query.answer()
     await query.edit_message_reply_markup(
-        reply_markup=render_machine_keyboard(page_data, machines)
+        reply_markup=render_machine_keyboard(page_data, machine_labels)
     )
 
 

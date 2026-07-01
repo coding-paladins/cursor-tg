@@ -8,7 +8,7 @@ from cursor_tg_connector.cursor_api_client import CursorApiClient
 from cursor_tg_connector.cursor_api_models import Agent, PromptImage
 from cursor_tg_connector.domain_types import SessionState, WizardStep
 from cursor_tg_connector.persistence_state_repo import StateRepository
-from cursor_tg_connector.utils_formatting import paginate
+from cursor_tg_connector.utils_formatting import normalize_repository_url, paginate
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +29,9 @@ class CreateAgentService:
         self,
         cursor_client: CursorApiClient,
         state_repo: StateRepository,
-        my_machines: list[str],
     ) -> None:
         self.cursor_client = cursor_client
         self.state_repo = state_repo
-        self._my_machines = my_machines
 
     async def start_wizard(self, telegram_user_id: int, chat_id: int) -> list[str]:
         session = await self.state_repo.update_chat_context(telegram_user_id, chat_id)
@@ -44,12 +42,6 @@ class CreateAgentService:
 
         if self._is_rate_limited(session):
             raise CreateAgentError("You can only start /newagent once per minute.")
-
-        if not self._my_machines:
-            raise CreateAgentError(
-                "No My Machines configured. Set CURSOR_MY_MACHINES to a comma-separated "
-                "list of worker --name values (one per Coder workspace)."
-            )
 
         models = await self.cursor_client.list_models()
         if not models:
@@ -306,17 +298,50 @@ class CreateAgentService:
         telegram_user_id: int,
         payload: dict[str, object],
     ) -> RepositoryPage:
+        repository = payload.get("repository")
+        if not isinstance(repository, str) or not repository:
+            raise CreateAgentError("Wizard state is missing a repository. Run /newagent again.")
+
+        workers = await self.cursor_client.list_my_machines()
+        normalized_repo = normalize_repository_url(repository)
+        matching = [
+            worker
+            for worker in workers
+            if normalize_repository_url(worker.repo_url) == normalized_repo
+        ]
+
+        if not matching:
+            raise CreateAgentError(
+                f"No connected My Machines found for repository {repository!r}. "
+                "Start a worker in that repo checkout with "
+                "`cursor-agent worker start --name <name>`."
+            )
+
+        machines = sorted({worker.name for worker in matching})
+        machine_labels = {
+            worker.name: f"{worker.name} (busy)" if worker.is_in_use else worker.name
+            for worker in matching
+        }
+
         payload = dict(payload)
         payload.pop("branches", None)
-        payload["machines"] = list(self._my_machines)
+
+        if len(machines) == 1:
+            payload["machine"] = machines[0]
+            await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
+            return self.get_machine_page_from_payload([], 0)
+
+        payload["machines"] = machines
+        payload["machine_labels"] = machine_labels
         await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_MACHINE, payload)
-        return self.get_machine_page_from_payload(self._my_machines, 0)
+        return self.get_machine_page_from_payload(machines, 0)
 
     async def _select_machine_name(self, telegram_user_id: int, machine_name: str) -> str:
         session = await self.state_repo.get_session(telegram_user_id)
         payload = dict(session.wizard_payload)
         payload["machine"] = machine_name
         payload.pop("machines", None)
+        payload.pop("machine_labels", None)
         await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
         return machine_name
 

@@ -38,10 +38,6 @@ class Settings(BaseSettings):
         default=1.0,
         alias="CURSOR_API_RETRY_BACKOFF_SECONDS",
     )
-    cursor_my_machines: list[str] = Field(
-        default_factory=list,
-        alias="CURSOR_MY_MACHINES",
-    )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_api_base_url: str = Field(
         default="https://api.openai.com",
@@ -86,17 +82,6 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_base_url(cls, value: str) -> str:
         return value.rstrip("/")
-
-    @field_validator("cursor_my_machines", mode="before")
-    @classmethod
-    def parse_my_machines(cls, value: object) -> list[str]:
-        if value is None or value == "":
-            return []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if isinstance(value, str):
-            return [part.strip() for part in value.split(",") if part.strip()]
-        raise ValueError("CURSOR_MY_MACHINES must be a comma-separated string or list")
 
     @property
     def voice_transcription_enabled(self) -> bool:

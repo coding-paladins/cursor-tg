@@ -58,11 +58,7 @@ async def run() -> None:
         else None
     )
     agent_service = AgentService(cursor_client, state_repo)
-    create_agent_service = CreateAgentService(
-        cursor_client,
-        state_repo,
-        settings.cursor_my_machines,
-    )
+    create_agent_service = CreateAgentService(cursor_client, state_repo)
     active_followups: set[str] = set()
     followup_service = FollowupService(
         settings=settings,
