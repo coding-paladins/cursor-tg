@@ -254,6 +254,29 @@ async def test_advance_to_machine_step_shows_picker_for_multiple_matches(state_r
 
 
 @pytest.mark.asyncio
+async def test_advance_to_machine_step_matches_fork_by_repo_name(state_repo) -> None:
+    client = FakeCursorClient()
+    client.repositories = [
+        "https://github.com/imrs776/societycell",
+        "https://github.com/coding-paladins/societycell",
+    ]
+    client.my_machines = [
+        _make_worker("coder-admin-societycell", "https://github.com/coding-paladins/societycell"),
+    ]
+    service = CreateAgentService(client, state_repo)
+    await service.start_wizard(1234, 5678)
+    await service.choose_model(1234, "gpt-5.4")
+    await service.choose_repository(1234, 0)
+
+    await service.save_branch(1234, "main")
+
+    session = await service.get_session(1234)
+    assert session.wizard_state == WizardStep.WAITING_PROMPT
+    assert session.wizard_payload["machine"] == "coder-admin-societycell"
+    assert session.wizard_payload["repository"] == "https://github.com/coding-paladins/societycell"
+
+
+@pytest.mark.asyncio
 async def test_advance_to_machine_step_errors_when_no_workers_match_repo(state_repo) -> None:
     client = FakeCursorClient()
     client.my_machines = [_make_worker("coder-other", "https://github.com/acme/other-repo")]

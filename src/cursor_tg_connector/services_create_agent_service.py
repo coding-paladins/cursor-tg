@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from cursor_tg_connector.cursor_api_client import CursorApiClient
-from cursor_tg_connector.cursor_api_models import Agent, PromptImage
+from cursor_tg_connector.cursor_api_models import Agent, PrivateWorker, PromptImage
 from cursor_tg_connector.domain_types import SessionState, WizardStep
 from cursor_tg_connector.persistence_state_repo import StateRepository
-from cursor_tg_connector.utils_formatting import normalize_repository_url, paginate
+from cursor_tg_connector.utils_formatting import normalize_repository_url, paginate, repository_slug
 
 logger = logging.getLogger(__name__)
 
@@ -303,28 +303,39 @@ class CreateAgentService:
             raise CreateAgentError("Wizard state is missing a repository. Run /newagent again.")
 
         workers = await self.cursor_client.list_my_machines()
-        normalized_repo = normalize_repository_url(repository)
-        matching = [
-            worker
-            for worker in workers
-            if normalize_repository_url(worker.repo_url) == normalized_repo
-        ]
+        matching = self._workers_for_repository(workers, repository)
 
         if not matching:
+            slug = repository_slug(repository)
+            registered_urls = sorted(
+                {
+                    worker.repo_url
+                    for worker in workers
+                    if slug is not None and worker.repo_name.lower() == slug[1].lower()
+                }
+            )
+            hint = ""
+            if registered_urls:
+                hint = (
+                    f" Connected workers for this repo name use {registered_urls[0]!r}; "
+                    "select that repository in step 2, or start the worker in a checkout "
+                    "of the repository you chose."
+                )
             raise CreateAgentError(
-                f"No connected My Machines found for repository {repository!r}. "
+                f"No connected My Machines found for repository {repository!r}.{hint} "
                 "Start a worker in that repo checkout with "
                 "`cursor-agent worker start --name <name>`."
             )
+
+        payload = dict(payload)
+        payload.pop("branches", None)
+        payload["repository"] = matching[0].repo_url
 
         machines = sorted({worker.name for worker in matching})
         machine_labels = {
             worker.name: f"{worker.name} (busy)" if worker.is_in_use else worker.name
             for worker in matching
         }
-
-        payload = dict(payload)
-        payload.pop("branches", None)
 
         if len(machines) == 1:
             payload["machine"] = machines[0]
@@ -352,6 +363,31 @@ class CreateAgentService:
                 "Wizard state is missing required options. Run /newagent again."
             )
         return values
+
+    def _workers_for_repository(
+        self,
+        workers: list[PrivateWorker],
+        repository_url: str,
+    ) -> list[PrivateWorker]:
+        normalized_repo = normalize_repository_url(repository_url)
+        exact_matches = [
+            worker
+            for worker in workers
+            if normalize_repository_url(worker.repo_url) == normalized_repo
+        ]
+        if exact_matches:
+            return exact_matches
+
+        slug = repository_slug(repository_url)
+        if slug is None:
+            return []
+
+        _owner, repo_name = slug
+        return [
+            worker
+            for worker in workers
+            if worker.repo_name.lower() == repo_name.lower()
+        ]
 
     async def _silence_agent(self, agent_id: str) -> None:
         try:
