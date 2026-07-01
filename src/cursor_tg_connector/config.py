@@ -38,6 +38,27 @@ class Settings(BaseSettings):
         default=1.0,
         alias="CURSOR_API_RETRY_BACKOFF_SECONDS",
     )
+    cursor_use_private_worker: bool = Field(
+        default=False,
+        alias="CURSOR_USE_PRIVATE_WORKER",
+    )
+    cursor_worker_pool_name: str | None = Field(
+        default=None,
+        alias="CURSOR_WORKER_POOL_NAME",
+    )
+    cursor_worker_machine_name: str | None = Field(
+        default=None,
+        alias="CURSOR_WORKER_MACHINE_NAME",
+    )
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_api_base_url: str = Field(
+        default="https://api.openai.com",
+        alias="OPENAI_API_BASE_URL",
+    )
+    voice_transcription_model: str = Field(
+        default="whisper-1",
+        alias="VOICE_TRANSCRIPTION_MODEL",
+    )
     sqlite_path: Path = Field(default=Path("/data/connector.db"), alias="SQLITE_PATH")
     poll_interval_seconds: float = Field(default=10.0, alias="POLL_INTERVAL_SECONDS")
     followup_poll_interval_seconds: float = Field(
@@ -69,10 +90,22 @@ class Settings(BaseSettings):
             raise ValueError("max retries must be zero or greater")
         return value
 
-    @field_validator("cursor_api_base_url", "github_api_base_url")
+    @field_validator("cursor_api_base_url", "github_api_base_url", "openai_api_base_url")
     @classmethod
     def normalize_base_url(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("cursor_worker_pool_name", "cursor_worker_machine_name")
+    @classmethod
+    def normalize_optional_worker_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @property
+    def voice_transcription_enabled(self) -> bool:
+        return bool(self.openai_api_key)
 
     @field_validator("github_default_merge_method")
     @classmethod

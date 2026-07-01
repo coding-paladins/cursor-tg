@@ -195,7 +195,28 @@ The SQLite database defaults to `/data/connector.db`. Mount `/data` to persisten
 | `/resetdb` | Show a confirmation prompt before wiping and reinitializing local SQLite state |
 | `/help` | Show available commands |
 
-Any other text message is forwarded as a follow-up to the active agent. When thread mode is enabled, follow-ups must be sent from the bound agent thread.
+Any other text message is forwarded as a follow-up to the active agent. Voice messages are transcribed automatically when `OPENAI_API_KEY` is configured. When thread mode is enabled, follow-ups must be sent from the bound agent thread.
+
+### My Machines / self-hosted workers
+
+To run agents on your own Coder workspace (or any My Machines worker) instead of Cursor-hosted VMs:
+
+1. In each workspace, start a Cursor worker:
+   ```bash
+   cursor-agent login
+   cursor-agent worker start
+   ```
+2. Deploy the bot with private worker routing enabled:
+   ```env
+   CURSOR_USE_PRIVATE_WORKER=true
+   ```
+3. Optionally pin a specific pool or machine:
+   ```env
+   CURSOR_WORKER_POOL_NAME=my-pool
+   CURSOR_WORKER_MACHINE_NAME=my-workspace
+   ```
+
+New agents created via `/newagent` will include `usePrivateWorker: true` in the Cursor API payload. Pool and machine names are sent as worker labels when set.
 
 ## Configuration Reference
 
@@ -211,6 +232,12 @@ Any other text message is forwarded as a follow-up to the active agent. When thr
 | `CURSOR_API_BASE_URL` | `https://api.cursor.com` | Cursor API base URL |
 | `CURSOR_API_MAX_RETRIES` | `3` | Max retries on transient API errors (429, 5xx) |
 | `CURSOR_API_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between retries (doubled each attempt) |
+| `CURSOR_USE_PRIVATE_WORKER` | `false` | Route new agents to My Machines / self-hosted workers (`usePrivateWorker: true`) |
+| `CURSOR_WORKER_POOL_NAME` | optional | Target a named self-hosted pool via worker labels |
+| `CURSOR_WORKER_MACHINE_NAME` | optional | Target a specific My Machines worker by name |
+| `OPENAI_API_KEY` | optional | Enables Telegram voice message transcription via OpenAI Whisper |
+| `OPENAI_API_BASE_URL` | `https://api.openai.com` | Base URL for the transcription API |
+| `VOICE_TRANSCRIPTION_MODEL` | `whisper-1` | Whisper model used for voice transcription |
 | `SQLITE_PATH` | `/data/connector.db` | Path to the SQLite database file |
 | `POLL_INTERVAL_SECONDS` | `10` | Seconds between background polling cycles |
 | `FOLLOWUP_POLL_INTERVAL_SECONDS` | `5` | Seconds between checks for agent response after a follow-up |

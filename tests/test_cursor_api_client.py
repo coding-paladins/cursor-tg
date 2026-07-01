@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -62,6 +64,53 @@ async def test_list_agents_paginates() -> None:
             agents = await client.list_agents()
 
     assert [agent.id for agent in agents] == ["agent-1", "agent-2"]
+
+
+@pytest.mark.asyncio
+async def test_create_agent_includes_private_worker_and_labels() -> None:
+    async with httpx.AsyncClient(base_url="https://api.cursor.com") as http_client:
+        client = CursorApiClient(
+            api_key="test-key",
+            base_url="https://api.cursor.com",
+            http_client=http_client,
+            use_private_worker=True,
+            worker_pool_name="coder-pool",
+            worker_machine_name="my-workspace",
+        )
+
+        with respx.mock(assert_all_called=True) as router:
+            route = router.post("https://api.cursor.com/v0/agents").mock(
+                return_value=httpx.Response(
+                    201,
+                    json={
+                        "id": "agent-1",
+                        "name": "A1",
+                        "status": "CREATING",
+                        "source": {
+                            "repository": "https://github.com/acme/repo",
+                            "ref": "main",
+                        },
+                        "target": {"url": "https://cursor.com/a1"},
+                        "createdAt": "2024-01-01T00:00:00Z",
+                    },
+                )
+            )
+
+            agent = await client.create_agent(
+                model="gpt-5",
+                repository_url="https://github.com/acme/repo",
+                base_branch="main",
+                prompt_text="hello",
+            )
+
+    assert agent.id == "agent-1"
+    request = route.calls[0].request
+    body = json.loads(request.content.decode())
+    assert body["usePrivateWorker"] is True
+    assert body["labels"] == [
+        {"key": "pool", "value": "coder-pool"},
+        {"key": "machine", "value": "my-workspace"},
+    ]
 
 
 @pytest.mark.asyncio
