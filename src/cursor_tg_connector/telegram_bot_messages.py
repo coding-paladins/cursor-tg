@@ -16,6 +16,7 @@ from cursor_tg_connector.telegram_bot_common import (
     auto_enable_thread_mode_if_supported,
     get_message_thread_id,
     get_services,
+    render_machine_keyboard,
 )
 from cursor_tg_connector.telegram_threads import ensure_agent_thread
 from cursor_tg_connector.utils_formatting import (
@@ -127,7 +128,34 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     if session.wizard_state == WizardStep.WAITING_BRANCH:
         try:
-            await services.create_agent_service.save_branch(
+            page_data = await services.create_agent_service.save_branch(
+                services.settings.telegram_allowed_user_id,
+                text,
+            )
+            session = await services.create_agent_service.get_session(
+                services.settings.telegram_allowed_user_id
+            )
+        except CreateAgentError as exc:
+            await msg.reply_text(str(exc))
+            return
+        if session.wizard_state == WizardStep.WAITING_PROMPT:
+            machine_name = session.wizard_payload["machine"]
+            await msg.reply_text(
+                f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+                f"on machine {machine_name!r}."
+            )
+            return
+        machine_labels = session.wizard_payload.get("machine_labels", {})
+        await msg.reply_text(
+            "Step 4/5: Select the My Machine to run this agent on. "
+            "The worker must be started in a checkout of the selected repository.",
+            reply_markup=render_machine_keyboard(page_data, machine_labels),
+        )
+        return
+
+    if session.wizard_state == WizardStep.WAITING_MACHINE:
+        try:
+            machine_name = await services.create_agent_service.save_machine(
                 services.settings.telegram_allowed_user_id,
                 text,
             )
@@ -135,7 +163,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await msg.reply_text(str(exc))
             return
         await msg.reply_text(
-            "Step 4/4: Send the prompt (text, voice, or photo with caption) for the new agent."
+            f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+            f"on machine {machine_name!r}."
         )
         return
 

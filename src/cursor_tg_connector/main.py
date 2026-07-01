@@ -45,9 +45,6 @@ async def run() -> None:
         base_url=settings.cursor_api_base_url,
         max_retries=settings.cursor_api_max_retries,
         retry_backoff_seconds=settings.cursor_api_retry_backoff_seconds,
-        use_private_worker=settings.cursor_use_private_worker,
-        worker_pool_name=settings.cursor_worker_pool_name,
-        worker_machine_name=settings.cursor_worker_machine_name,
     )
     api_key_info = await cursor_client.validate_api_key()
     logger.info("Validated Cursor API key: %s", api_key_info.api_key_name)

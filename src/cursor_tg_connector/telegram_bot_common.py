@@ -19,6 +19,8 @@ from cursor_tg_connector.services_voice_transcription import VoiceTranscriptionS
 from cursor_tg_connector.telegram_bot_constants import (
     BRANCH_PAGE_PREFIX,
     BRANCH_SELECT_PREFIX,
+    MACHINE_PAGE_PREFIX,
+    MACHINE_SELECT_PREFIX,
     MODEL_PAGE_PREFIX,
     MODEL_SELECT_PREFIX,
     PR_MERGE_PREFIX,
@@ -44,7 +46,7 @@ BOT_COMMANDS: list[tuple[str, str]] = [
     ("clear", "Mark all unread messages as read for the active agent"),
     ("close", "Close the current bound Telegram agent thread"),
     ("threadmode", "Toggle per-agent Telegram thread routing"),
-    ("newagent", "Create a new Cursor cloud agent"),
+    ("newagent", "Create a new Cursor agent on a My Machine"),
     ("pr", "Show the current agent pull request and actions"),
     ("diff", "Show the current agent pull request diff"),
     ("ready", "Mark the current agent pull request ready for review"),
@@ -162,6 +164,25 @@ def render_branch_keyboard(
         for index, branch in enumerate(page_data.repositories)
     ]
     rows.extend(_pagination_rows(page_data.page, page_data.total_pages, BRANCH_PAGE_PREFIX))
+    return InlineKeyboardMarkup(rows)
+
+
+def render_machine_keyboard(
+    page_data: RepositoryPage,
+    machine_labels: dict[str, str] | None = None,
+) -> InlineKeyboardMarkup:
+    labels = machine_labels or {}
+    start_index = page_data.page * 8
+    rows = [
+        [
+            InlineKeyboardButton(
+                labels.get(machine, machine),
+                callback_data=f"{MACHINE_SELECT_PREFIX}{start_index + index}",
+            )
+        ]
+        for index, machine in enumerate(page_data.repositories)
+    ]
+    rows.extend(_pagination_rows(page_data.page, page_data.total_pages, MACHINE_PAGE_PREFIX))
     return InlineKeyboardMarkup(rows)
 
 

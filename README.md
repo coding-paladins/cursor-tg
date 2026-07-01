@@ -186,7 +186,7 @@ The SQLite database defaults to `/data/connector.db`. Mount `/data` to persisten
 | `/clear` | Mark all unread messages as read for the active agent |
 | `/close` | Close the current bound Telegram thread/topic in threaded mode without deleting the Cursor agent |
 | `/threadmode` | Show status or toggle per-agent Telegram thread routing with `/threadmode on|off|status` (requires bot-level Threaded Mode in @BotFather) |
-| `/newagent` | Create a new agent with a 4-step wizard (model → repo → branch → prompt) |
+| `/newagent` | Create a new agent with a 5-step wizard (model → repo → branch → machine → prompt) |
 | `/pr` | Show the active agent PR status and action buttons |
 | `/diff` | Show the active agent PR diff in a Telegram code block |
 | `/ready` | Mark the active agent PR ready for review |
@@ -195,28 +195,23 @@ The SQLite database defaults to `/data/connector.db`. Mount `/data` to persisten
 | `/resetdb` | Show a confirmation prompt before wiping and reinitializing local SQLite state |
 | `/help` | Show available commands |
 
-Any other text message is forwarded as a follow-up to the active agent. Voice messages are transcribed automatically when `OPENAI_API_KEY` is configured. When thread mode is enabled, follow-ups must be sent from the bound agent thread.
+### My Machines
 
-### My Machines / self-hosted workers
+Agents always run on a **My Machine** worker you select during `/newagent`. Self-hosted pools are not supported.
 
-To run agents on your own Coder workspace (or any My Machines worker) instead of Cursor-hosted VMs:
-
-1. In each workspace, start a Cursor worker:
+1. In each Coder workspace, start a named worker in the repo checkout:
    ```bash
+   cd /path/to/that-repo
    cursor-agent login
-   cursor-agent worker start
+   cursor-agent worker start --name "coder-my-repo"
    ```
-2. Deploy the bot with private worker routing enabled:
-   ```env
-   CURSOR_USE_PRIVATE_WORKER=true
-   ```
-3. Optionally pin a specific pool or machine:
-   ```env
-   CURSOR_WORKER_POOL_NAME=my-pool
-   CURSOR_WORKER_MACHINE_NAME=my-workspace
-   ```
+2. Run `/newagent` → pick model, repo, branch, **machine**, then prompt.
 
-New agents created via `/newagent` will include `usePrivateWorker: true` in the Cursor API payload. Pool and machine names are sent as worker labels when set.
+Connected My Machines are discovered automatically from the Cursor API when you reach the machine step. Only workers registered for the selected repository are shown. If exactly one machine matches, that step is skipped.
+
+Cursor routes the agent only when the selected machine name matches the worker `--name` and that worker was started in a checkout of the chosen repository.
+
+Any other text message is forwarded as a follow-up to the active agent. Voice messages are transcribed automatically when `OPENAI_API_KEY` is configured. When thread mode is enabled, follow-ups must be sent from the bound agent thread.
 
 ## Configuration Reference
 
@@ -232,9 +227,6 @@ New agents created via `/newagent` will include `usePrivateWorker: true` in the 
 | `CURSOR_API_BASE_URL` | `https://api.cursor.com` | Cursor API base URL |
 | `CURSOR_API_MAX_RETRIES` | `3` | Max retries on transient API errors (429, 5xx) |
 | `CURSOR_API_RETRY_BACKOFF_SECONDS` | `1` | Base backoff between retries (doubled each attempt) |
-| `CURSOR_USE_PRIVATE_WORKER` | `false` | Route new agents to My Machines / self-hosted workers (`usePrivateWorker: true`) |
-| `CURSOR_WORKER_POOL_NAME` | optional | Target a named self-hosted pool via worker labels |
-| `CURSOR_WORKER_MACHINE_NAME` | optional | Target a specific My Machines worker by name |
 | `OPENAI_API_KEY` | optional | Enables Telegram voice message transcription via OpenAI Whisper |
 | `OPENAI_API_BASE_URL` | `https://api.openai.com` | Base URL for the transcription API |
 | `VOICE_TRANSCRIPTION_MODEL` | `whisper-1` | Whisper model used for voice transcription |

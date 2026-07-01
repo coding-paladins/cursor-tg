@@ -10,6 +10,7 @@ class WizardStep(StrEnum):
     WAITING_MODEL = "waiting_model"
     WAITING_REPOSITORY = "waiting_repository"
     WAITING_BRANCH = "waiting_branch"
+    WAITING_MACHINE = "waiting_machine"
     WAITING_PROMPT = "waiting_prompt"
 
 

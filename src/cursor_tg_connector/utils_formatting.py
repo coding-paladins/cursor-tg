@@ -67,6 +67,30 @@ def markdown_to_telegram_html(text: str) -> str:
     return text.strip()
 
 
+def normalize_repository_url(url: str) -> str:
+    normalized = url.strip()
+    if normalized.startswith("git@"):
+        host_and_path = normalized[4:]
+        if ":" in host_and_path:
+            host, path = host_and_path.split(":", 1)
+            normalized = f"https://{host}/{path}"
+    normalized = normalized.rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    return normalized.lower()
+
+
+def repository_slug(url: str) -> tuple[str, str] | None:
+    normalized = normalize_repository_url(url)
+    if "github.com/" not in normalized:
+        return None
+    slug = normalized.split("github.com/", 1)[1]
+    parts = slug.split("/")
+    if len(parts) < 2:
+        return None
+    return parts[0], parts[1]
+
+
 def shorten_repository_name(repository_url: str) -> str:
     trimmed = repository_url.rstrip("/")
     if "github.com/" in trimmed:

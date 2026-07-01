@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from cursor_tg_connector.cursor_api_client import CursorApiClient
-from cursor_tg_connector.cursor_api_models import Agent, PromptImage
+from cursor_tg_connector.cursor_api_models import Agent, PrivateWorker, PromptImage
 from cursor_tg_connector.domain_types import SessionState, WizardStep
 from cursor_tg_connector.persistence_state_repo import StateRepository
-from cursor_tg_connector.utils_formatting import paginate
+from cursor_tg_connector.utils_formatting import normalize_repository_url, paginate, repository_slug
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,11 @@ class RepositoryPage:
 
 
 class CreateAgentService:
-    def __init__(self, cursor_client: CursorApiClient, state_repo: StateRepository) -> None:
+    def __init__(
+        self,
+        cursor_client: CursorApiClient,
+        state_repo: StateRepository,
+    ) -> None:
         self.cursor_client = cursor_client
         self.state_repo = state_repo
 
@@ -140,7 +144,7 @@ class CreateAgentService:
         items, current_page, total_pages = paginate(branches, page, per_page)
         return RepositoryPage(repositories=items, page=current_page, total_pages=total_pages)
 
-    async def choose_branch(self, telegram_user_id: int, branch_index: int) -> None:
+    async def choose_branch(self, telegram_user_id: int, branch_index: int) -> RepositoryPage:
         session = await self.state_repo.get_session(telegram_user_id)
         branches = self._wizard_list(session, "branches")
         if (
@@ -153,10 +157,9 @@ class CreateAgentService:
 
         payload = dict(session.wizard_payload)
         payload["branch"] = branches[branch_index]
-        del payload["branches"]
-        await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
+        return await self._advance_to_machine_step(telegram_user_id, payload)
 
-    async def save_branch(self, telegram_user_id: int, branch_name: str) -> None:
+    async def save_branch(self, telegram_user_id: int, branch_name: str) -> RepositoryPage:
         branch_name = branch_name.strip()
         if not branch_name:
             raise CreateAgentError("Base branch cannot be empty.")
@@ -167,8 +170,58 @@ class CreateAgentService:
 
         payload = dict(session.wizard_payload)
         payload["branch"] = branch_name
-        payload.pop("branches", None)
-        await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
+        return await self._advance_to_machine_step(telegram_user_id, payload)
+
+    async def get_machine_page(
+        self,
+        telegram_user_id: int,
+        page: int,
+        per_page: int = 8,
+    ) -> RepositoryPage:
+        session = await self.state_repo.get_session(telegram_user_id)
+        machines = self._wizard_list(session, "machines")
+        return self.get_machine_page_from_payload(machines, page, per_page)
+
+    def get_machine_page_from_payload(
+        self,
+        machines: list[str],
+        page: int,
+        per_page: int = 8,
+    ) -> RepositoryPage:
+        items, current_page, total_pages = paginate(machines, page, per_page)
+        return RepositoryPage(repositories=items, page=current_page, total_pages=total_pages)
+
+    async def choose_machine(self, telegram_user_id: int, machine_index: int) -> str:
+        session = await self.state_repo.get_session(telegram_user_id)
+        machines = self._wizard_list(session, "machines")
+        if (
+            session.wizard_state != WizardStep.WAITING_MACHINE
+            or machine_index >= len(machines)
+        ):
+            raise CreateAgentError(
+                "That machine selection is no longer valid. Run /newagent again."
+            )
+
+        machine_name = machines[machine_index]
+        return await self._select_machine_name(telegram_user_id, machine_name)
+
+    async def save_machine(self, telegram_user_id: int, machine_name: str) -> str:
+        machine_name = machine_name.strip()
+        if not machine_name:
+            raise CreateAgentError("Machine name cannot be empty.")
+
+        session = await self.state_repo.get_session(telegram_user_id)
+        if session.wizard_state != WizardStep.WAITING_MACHINE:
+            raise CreateAgentError("No machine input is expected right now.")
+
+        machines = self._wizard_list(session, "machines")
+        if machine_name not in machines:
+            raise CreateAgentError(
+                f"Unknown machine {machine_name!r}. Use the inline buttons or one of: "
+                + ", ".join(machines)
+            )
+
+        return await self._select_machine_name(telegram_user_id, machine_name)
 
     async def finish_prompt(
         self,
@@ -185,12 +238,17 @@ class CreateAgentService:
             raise CreateAgentError("No prompt input is expected right now.")
 
         payload = session.wizard_payload
+        machine_name = payload.get("machine")
+        if not isinstance(machine_name, str) or not machine_name:
+            raise CreateAgentError("No machine is selected. Run /newagent again.")
+
         previous_active_agent_id = session.active_agent_id
         agent = await self.cursor_client.create_agent(
             model=payload["model"],
             repository_url=payload["repository"],
             base_branch=payload["branch"],
             prompt_text=prompt_text,
+            machine_name=machine_name,
             images=images,
         )
         await self.state_repo.set_delivery_cursor(agent.id, 0)
@@ -235,6 +293,69 @@ class CreateAgentService:
 
         return branches
 
+    async def _advance_to_machine_step(
+        self,
+        telegram_user_id: int,
+        payload: dict[str, object],
+    ) -> RepositoryPage:
+        repository = payload.get("repository")
+        if not isinstance(repository, str) or not repository:
+            raise CreateAgentError("Wizard state is missing a repository. Run /newagent again.")
+
+        workers = await self.cursor_client.list_my_machines()
+        matching = self._workers_for_repository(workers, repository)
+
+        if not matching:
+            slug = repository_slug(repository)
+            registered_urls = sorted(
+                {
+                    worker.repo_url
+                    for worker in workers
+                    if slug is not None and worker.repo_name.lower() == slug[1].lower()
+                }
+            )
+            hint = ""
+            if registered_urls:
+                hint = (
+                    f" Connected workers for this repo name use {registered_urls[0]!r}; "
+                    "select that repository in step 2, or start the worker in a checkout "
+                    "of the repository you chose."
+                )
+            raise CreateAgentError(
+                f"No connected My Machines found for repository {repository!r}.{hint} "
+                "Start a worker in that repo checkout with "
+                "`cursor-agent worker start --name <name>`."
+            )
+
+        payload = dict(payload)
+        payload.pop("branches", None)
+        payload["repository"] = matching[0].repo_url
+
+        machines = sorted({worker.name for worker in matching})
+        machine_labels = {
+            worker.name: f"{worker.name} (busy)" if worker.is_in_use else worker.name
+            for worker in matching
+        }
+
+        if len(machines) == 1:
+            payload["machine"] = machines[0]
+            await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
+            return self.get_machine_page_from_payload([], 0)
+
+        payload["machines"] = machines
+        payload["machine_labels"] = machine_labels
+        await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_MACHINE, payload)
+        return self.get_machine_page_from_payload(machines, 0)
+
+    async def _select_machine_name(self, telegram_user_id: int, machine_name: str) -> str:
+        session = await self.state_repo.get_session(telegram_user_id)
+        payload = dict(session.wizard_payload)
+        payload["machine"] = machine_name
+        payload.pop("machines", None)
+        payload.pop("machine_labels", None)
+        await self.state_repo.set_wizard(telegram_user_id, WizardStep.WAITING_PROMPT, payload)
+        return machine_name
+
     def _wizard_list(self, session: SessionState, key: str) -> list[str]:
         values = session.wizard_payload.get(key)
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
@@ -242,6 +363,31 @@ class CreateAgentService:
                 "Wizard state is missing required options. Run /newagent again."
             )
         return values
+
+    def _workers_for_repository(
+        self,
+        workers: list[PrivateWorker],
+        repository_url: str,
+    ) -> list[PrivateWorker]:
+        normalized_repo = normalize_repository_url(repository_url)
+        exact_matches = [
+            worker
+            for worker in workers
+            if normalize_repository_url(worker.repo_url) == normalized_repo
+        ]
+        if exact_matches:
+            return exact_matches
+
+        slug = repository_slug(repository_url)
+        if slug is None:
+            return []
+
+        _owner, repo_name = slug
+        return [
+            worker
+            for worker in workers
+            if worker.repo_name.lower() == repo_name.lower()
+        ]
 
     async def _silence_agent(self, agent_id: str) -> None:
         try:

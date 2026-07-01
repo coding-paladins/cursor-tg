@@ -3,7 +3,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from cursor_tg_connector.domain_types import UnselectedAgentUnreadMode
+from cursor_tg_connector.domain_types import UnselectedAgentUnreadMode, WizardStep
 from cursor_tg_connector.github_api_client import GitHubApiError
 from cursor_tg_connector.services_create_agent_service import CreateAgentError
 from cursor_tg_connector.services_notification import TelegramNotifier
@@ -16,6 +16,7 @@ from cursor_tg_connector.telegram_bot_commands import (
 from cursor_tg_connector.telegram_bot_common import (
     get_services,
     render_branch_keyboard,
+    render_machine_keyboard,
     render_model_keyboard,
     render_pull_request_keyboard,
     render_repository_keyboard,
@@ -25,6 +26,8 @@ from cursor_tg_connector.telegram_bot_common import (
 from cursor_tg_connector.telegram_bot_constants import (
     BRANCH_PAGE_PREFIX,
     BRANCH_SELECT_PREFIX,
+    MACHINE_PAGE_PREFIX,
+    MACHINE_SELECT_PREFIX,
     MODEL_PAGE_PREFIX,
     MODEL_SELECT_PREFIX,
     PR_MERGE_PREFIX,
@@ -107,6 +110,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if data.startswith(BRANCH_SELECT_PREFIX):
         await _select_branch(update, context, int(data[len(BRANCH_SELECT_PREFIX) :]))
+        return
+    if data.startswith(MACHINE_PAGE_PREFIX):
+        await _show_machine_page(update, context, int(data[len(MACHINE_PAGE_PREFIX) :]))
+        return
+    if data.startswith(MACHINE_SELECT_PREFIX):
+        await _select_machine(update, context, int(data[len(MACHINE_SELECT_PREFIX) :]))
         return
 
     await query.answer()
@@ -218,7 +227,7 @@ async def _select_model(update: Update, context: ContextTypes.DEFAULT_TYPE, mode
     repositories = session.wizard_payload["repositories"]
     await query.answer("Model selected")
     await query.edit_message_text(
-        "Step 2/4: Select a repository URL.",
+        "Step 2/5: Select a repository URL.",
         reply_markup=render_repository_keyboard(page_data, repositories),
     )
 
@@ -268,7 +277,7 @@ async def _select_repository(
     page_data = services.create_agent_service.get_branch_page_from_payload(branches, 0)
     await query.answer("Repository selected")
     await query.edit_message_text(
-        f"Step 3/4: Select a base branch for {repository}, or type a branch name.",
+        f"Step 3/5: Select a base branch for {repository}, or type a branch name.",
         reply_markup=render_branch_keyboard(page_data, branches),
     )
 
@@ -307,16 +316,81 @@ async def _select_branch(
     query = update.callback_query
     services = get_services(context)
     try:
-        await services.create_agent_service.choose_branch(
+        page_data = await services.create_agent_service.choose_branch(
             services.settings.telegram_allowed_user_id,
             branch_index,
+        )
+        session = await services.create_agent_service.get_session(
+            services.settings.telegram_allowed_user_id
         )
     except CreateAgentError as exc:
         await query.answer(str(exc), show_alert=True)
         return
 
     await query.answer("Branch selected")
-    await query.edit_message_text("Step 4/4: Send the prompt text for the new agent.")
+    if session.wizard_state == WizardStep.WAITING_PROMPT:
+        machine_name = session.wizard_payload["machine"]
+        await query.edit_message_text(
+            f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+            f"on machine {machine_name!r}."
+        )
+        return
+
+    machine_labels = session.wizard_payload.get("machine_labels", {})
+    await query.edit_message_text(
+        "Step 4/5: Select the My Machine to run this agent on. "
+        "The worker must be started in a checkout of the selected repository.",
+        reply_markup=render_machine_keyboard(page_data, machine_labels),
+    )
+
+
+async def _show_machine_page(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    page: int,
+) -> None:
+    query = update.callback_query
+    services = get_services(context)
+    try:
+        page_data = await services.create_agent_service.get_machine_page(
+            services.settings.telegram_allowed_user_id,
+            page,
+        )
+        session = await services.create_agent_service.get_session(
+            services.settings.telegram_allowed_user_id
+        )
+        machine_labels = session.wizard_payload.get("machine_labels", {})
+    except CreateAgentError as exc:
+        await query.answer(str(exc), show_alert=True)
+        return
+
+    await query.answer()
+    await query.edit_message_reply_markup(
+        reply_markup=render_machine_keyboard(page_data, machine_labels)
+    )
+
+
+async def _select_machine(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    machine_index: int,
+) -> None:
+    query = update.callback_query
+    services = get_services(context)
+    try:
+        machine_name = await services.create_agent_service.choose_machine(
+            services.settings.telegram_allowed_user_id,
+            machine_index,
+        )
+    except CreateAgentError as exc:
+        await query.answer(str(exc), show_alert=True)
+        return
+
+    await query.answer("Machine selected")
+    await query.edit_message_text(
+        f"Step 5/5: Send the prompt (text, voice, or photo with caption) for the new agent "
+        f"on machine {machine_name!r}."
+    )
 
 
 async def _show_pull_request(
