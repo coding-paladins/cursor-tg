@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Telegram connector for Cursor Cloud agents"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
 dependencies = [
   "aiosqlite>=0.20.0",
   "httpx>=0.27.0",
@@ -17,12 +17,17 @@ dependencies = [
   "python-telegram-bot[job-queue]>=21.4",
 ]
 
+[project.scripts]
+cursor-tg-connector = "cursor_tg_connector.main:main"
+
 [project.urls]
-Homepage = "https://github.com/tb5z035i/cursor-tg"
-Repository = "https://github.com/tb5z035i/cursor-tg"
+Homepage = "https://github.com/coding-paladins/cursor-tg"
+Repository = "https://github.com/coding-paladins/cursor-tg"
+Issues = "https://github.com/coding-paladins/cursor-tg/issues"
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2.0",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "respx>=0.21.1",
