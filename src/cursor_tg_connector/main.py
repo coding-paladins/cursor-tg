@@ -16,6 +16,7 @@ from cursor_tg_connector.services_create_agent_service import CreateAgentService
 from cursor_tg_connector.services_followup_service import FollowupService
 from cursor_tg_connector.services_polling_service import PollingService
 from cursor_tg_connector.services_pull_request_service import PullRequestService
+from cursor_tg_connector.services_voice_transcription import VoiceTranscriptionService
 from cursor_tg_connector.telegram_bot_app import build_application, register_commands
 from cursor_tg_connector.telegram_bot_common import AppServices
 from cursor_tg_connector.utils_logging import configure_logging
@@ -44,6 +45,9 @@ async def run() -> None:
         base_url=settings.cursor_api_base_url,
         max_retries=settings.cursor_api_max_retries,
         retry_backoff_seconds=settings.cursor_api_retry_backoff_seconds,
+        use_private_worker=settings.cursor_use_private_worker,
+        worker_pool_name=settings.cursor_worker_pool_name,
+        worker_machine_name=settings.cursor_worker_machine_name,
     )
     api_key_info = await cursor_client.validate_api_key()
     logger.info("Validated Cursor API key: %s", api_key_info.api_key_name)
@@ -73,6 +77,9 @@ async def run() -> None:
         active_followups=active_followups,
     )
     pull_request_service = PullRequestService(github_client)
+    voice_transcription_service = (
+        VoiceTranscriptionService(settings) if settings.voice_transcription_enabled else None
+    )
     app_services = AppServices(
         settings=settings,
         database=database,
@@ -81,6 +88,7 @@ async def run() -> None:
         followup_service=followup_service,
         polling_service=polling_service,
         pull_request_service=pull_request_service,
+        voice_transcription_service=voice_transcription_service,
     )
 
     application = build_application(app_services)
@@ -114,6 +122,8 @@ async def run() -> None:
         await cursor_client.aclose()
         if github_client is not None:
             await github_client.aclose()
+        if voice_transcription_service is not None:
+            await voice_transcription_service.aclose()
 
 
 def main() -> None:

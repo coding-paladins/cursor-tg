@@ -15,6 +15,7 @@ from cursor_tg_connector.services_create_agent_service import CreateAgentService
 from cursor_tg_connector.services_followup_service import FollowupService
 from cursor_tg_connector.services_polling_service import PollingService
 from cursor_tg_connector.services_pull_request_service import PullRequestService
+from cursor_tg_connector.services_voice_transcription import VoiceTranscriptionService
 from cursor_tg_connector.telegram_bot_constants import (
     BRANCH_PAGE_PREFIX,
     BRANCH_SELECT_PREFIX,
@@ -63,6 +64,7 @@ class AppServices:
     followup_service: FollowupService
     polling_service: PollingService
     pull_request_service: PullRequestService
+    voice_transcription_service: VoiceTranscriptionService | None = None
 
 
 def get_services(context: ContextTypes.DEFAULT_TYPE) -> AppServices:

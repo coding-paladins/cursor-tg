@@ -79,6 +79,9 @@ def build_application(services: AppServices) -> Application:
     application.add_handler(
         MessageHandler(filters.PHOTO, message_handler)
     )
+    application.add_handler(
+        MessageHandler(filters.VOICE | filters.AUDIO, message_handler)
+    )
     application.add_error_handler(error_handler)
 
     application.job_queue.run_repeating(

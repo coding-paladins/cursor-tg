@@ -33,11 +33,17 @@ class CursorApiClient:
         timeout_seconds: float = 30.0,
         max_retries: int = 3,
         retry_backoff_seconds: float = 1.0,
+        use_private_worker: bool = False,
+        worker_pool_name: str | None = None,
+        worker_machine_name: str | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._owns_client = http_client is None
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
+        self._use_private_worker = use_private_worker
+        self._worker_pool_name = worker_pool_name
+        self._worker_machine_name = worker_machine_name
         self._client = http_client or httpx.AsyncClient(
             base_url=base_url,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -106,21 +112,49 @@ class CursorApiClient:
         base_branch: str,
         prompt_text: str,
         images: list[PromptImage] | None = None,
+        use_private_worker: bool | None = None,
+        worker_pool_name: str | None = None,
+        worker_machine_name: str | None = None,
     ) -> Agent:
         prompt: dict[str, Any] = {"text": prompt_text}
         if images:
             prompt["images"] = [img.model_dump(exclude_none=True) for img in images]
+        body: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "source": {"repository": repository_url, "ref": base_branch},
+        }
+        resolved_use_private_worker = (
+            self._use_private_worker if use_private_worker is None else use_private_worker
+        )
+        if resolved_use_private_worker:
+            body["usePrivateWorker"] = True
+        labels = self._build_worker_labels(
+            worker_pool_name=worker_pool_name,
+            worker_machine_name=worker_machine_name,
+        )
+        if labels:
+            body["labels"] = labels
         payload = await self._request(
             "POST",
             "/v0/agents",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "source": {"repository": repository_url, "ref": base_branch},
-            },
+            json=body,
             expected_status=201,
         )
         return Agent.model_validate(payload)
+
+    async def list_private_workers(
+        self,
+        *,
+        status: str = "idle",
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"status": status, "limit": limit}
+        payload = await self._request("GET", "/v0/private-workers", params=params)
+        workers = payload.get("workers")
+        if isinstance(workers, list):
+            return workers
+        return []
 
     async def list_models(self) -> list[str]:
         payload = await self._request("GET", "/v0/models")
@@ -131,6 +165,23 @@ class CursorApiClient:
         payload = await self._request("GET", "/v0/repositories")
         response = ListRepositoriesResponse.model_validate(payload)
         return [repository.repository for repository in response.repositories]
+
+    def _build_worker_labels(
+        self,
+        *,
+        worker_pool_name: str | None = None,
+        worker_machine_name: str | None = None,
+    ) -> list[dict[str, str]]:
+        labels: list[dict[str, str]] = []
+        pool_name = self._worker_pool_name if worker_pool_name is None else worker_pool_name
+        machine_name = (
+            self._worker_machine_name if worker_machine_name is None else worker_machine_name
+        )
+        if pool_name:
+            labels.append({"key": "pool", "value": pool_name})
+        if machine_name:
+            labels.append({"key": "machine", "value": machine_name})
+        return labels
 
     async def _request(
         self,
