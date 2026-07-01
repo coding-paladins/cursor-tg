@@ -334,16 +334,31 @@ docker run -d \
 
 ### Docker image releases
 
-GitHub Actions publishes Docker images to Docker Hub in two cases:
+GitHub Actions builds and publishes on every push to `main`, pull request, and release tag:
 
-- Every push to `main` publishes:
-  - `DOCKER_HUB_USER/cursor-tg:latest`
+- **Tests and package build** — `ruff`, `pytest`, and `python -m build` produce installable wheel/sdist artifacts.
+- **Container images** — pushed to GitHub Container Registry:
+  - `ghcr.io/coding-paladins/cursor-tg:0.1.<build>` on each `main` push
+  - `ghcr.io/coding-paladins/cursor-tg:latest` on `main` and valid release tags
+  - `ghcr.io/coding-paladins/cursor-tg:<tag>` when a git tag reachable from `main` is pushed
 
-- Pushing a new Git tag whose commit is reachable from `main` publishes:
-  - `DOCKER_HUB_USER/cursor-tg:<tag>`
-  - `DOCKER_HUB_USER/cursor-tg:latest`
+Pull requests build the image locally in CI with a `pr-<number>` tag but do not publish `latest`.
 
-The workflow uses the `DOCKER_HUB_USER` and `DOCKER_HUB_PAT` GitHub secrets for authentication.
+Example:
+
+```bash
+docker pull ghcr.io/coding-paladins/cursor-tg:latest
+docker run --rm --env-file .env -v "$(pwd)/data:/data" ghcr.io/coding-paladins/cursor-tg:latest
+```
+
+### Python package install
+
+```bash
+pip install .
+# or after downloading wheel artifacts from a main-branch workflow run:
+pip install cursor_tg_connector-*.whl
+cursor-tg-connector
+```
 
 ## Architecture
 
