@@ -59,7 +59,7 @@ _HELP_TEXT = (
     "• Send /stop to stop the currently selected running agent.\n"
     "• Send /close from inside an agent thread to close and unbind that Telegram thread.\n"
     "• Send /threadmode on to route each agent into its own Telegram thread.\n"
-    "• Send /newagent to create a new agent (model → repo → branch → prompt).\n"
+    "• Send /newagent to create a new agent (model → repo → branch → machine → prompt).\n"
     "• Send /pr to inspect the current agent pull request and use action buttons.\n"
     "• Send /diff to show the current agent pull request diff in a code block.\n"
     "• Send /ready to mark the current agent pull request ready for review.\n"
@@ -459,7 +459,7 @@ async def new_agent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
 
     await update.effective_message.reply_text(
-        "Step 1/4: Select a model ID.",
+        "Step 1/5: Select a model ID.",
         reply_markup=render_model_keyboard(first_page),
     )
 

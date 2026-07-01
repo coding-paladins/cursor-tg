@@ -67,15 +67,12 @@ async def test_list_agents_paginates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_agent_includes_private_worker_and_labels() -> None:
+async def test_create_agent_targets_my_machine() -> None:
     async with httpx.AsyncClient(base_url="https://api.cursor.com") as http_client:
         client = CursorApiClient(
             api_key="test-key",
             base_url="https://api.cursor.com",
             http_client=http_client,
-            use_private_worker=True,
-            worker_pool_name="coder-pool",
-            worker_machine_name="my-workspace",
         )
 
         with respx.mock(assert_all_called=True) as router:
@@ -101,15 +98,16 @@ async def test_create_agent_includes_private_worker_and_labels() -> None:
                 repository_url="https://github.com/acme/repo",
                 base_branch="main",
                 prompt_text="hello",
+                machine_name="coder-my-repo",
             )
 
     assert agent.id == "agent-1"
     request = route.calls[0].request
     body = json.loads(request.content.decode())
-    assert body["usePrivateWorker"] is True
+    assert "usePrivateWorker" not in body
     assert body["labels"] == [
-        {"key": "pool", "value": "coder-pool"},
-        {"key": "machine", "value": "my-workspace"},
+        {"key": "machine", "value": "coder-my-repo"},
+        {"key": "worker", "value": "coder-my-repo"},
     ]
 
 
@@ -136,6 +134,7 @@ async def test_create_agent_surfaces_cursor_error_message() -> None:
                     repository_url="https://github.com/acme/repo",
                     base_branch="main",
                     prompt_text="hello",
+                    machine_name="coder-my-repo",
                 )
 
 

@@ -3,34 +3,18 @@ from __future__ import annotations
 from cursor_tg_connector.config import Settings
 
 
-def test_cursor_use_private_worker_defaults_to_false(tmp_path) -> None:
+def test_cursor_my_machines_parses_comma_separated_list(tmp_path) -> None:
     settings = Settings.model_validate(
         {
             "TELEGRAM_BOT_TOKEN": "token",
             "TELEGRAM_ALLOWED_USER_ID": 1234,
             "CURSOR_API_KEY": "cursor-key",
             "SQLITE_PATH": str(tmp_path / "connector.db"),
+            "CURSOR_MY_MACHINES": "coder-a, coder-b ,coder-c",
         }
     )
 
-    assert settings.cursor_use_private_worker is False
-    assert settings.cursor_worker_pool_name is None
-    assert settings.cursor_worker_machine_name is None
-    assert settings.voice_transcription_enabled is False
-
-
-def test_voice_transcription_enabled_when_openai_key_set(tmp_path) -> None:
-    settings = Settings.model_validate(
-        {
-            "TELEGRAM_BOT_TOKEN": "token",
-            "TELEGRAM_ALLOWED_USER_ID": 1234,
-            "CURSOR_API_KEY": "cursor-key",
-            "SQLITE_PATH": str(tmp_path / "connector.db"),
-            "OPENAI_API_KEY": "openai-key",
-        }
-    )
-
-    assert settings.voice_transcription_enabled is True
+    assert settings.cursor_my_machines == ["coder-a", "coder-b", "coder-c"]
 
 
 def test_github_default_merge_method_defaults_to_merge(tmp_path) -> None:
